@@ -1,791 +1,335 @@
 # ARCIA
+### Autonomous Research & Competitive Intelligence Agent
 
-## AI Research & Competitive Intelligence Agent
+[![Runtime](https://img.shields.io/badge/orchestrator-hand--rolled_ReAct-black)]()
+[![LLM](https://img.shields.io/badge/model-Gemini_3.7--flash-blue)]()
+[![Transport](https://img.shields.io/badge/realtime-SSE_pub--sub-green)]()
+[![Persistence](https://img.shields.io/badge/store-cache--aside_/_Postgres-orange)]()
 
-ARCIA is an autonomous AI-powered research and competitive intelligence platform designed to continuously investigate competitors, research developments, patents, industry news, and emerging technology trends.
+A bounded ReAct agent that plans → acts → observes across three independent
+evidence domains (web / academic / patent), self-terminates on evidence
+sufficiency, and diffs every new finding against a persistent per-competitor
+memory to produce **delta-aware** intelligence — not just search results.
 
-Instead of simply collecting information, ARCIA uses an agentic workflow to determine **what information it needs, which tools to use, when additional evidence is required, and when it has enough evidence to produce an actionable intelligence report.**
-
----
-
-## 🚀 Core Concept
-
-ARCIA follows an autonomous investigation loop:
-
-```text
-User Investigation
-        ↓
-   🤖 AI Agent
-        ↓
-   Reason / Decide
-        ↓
-   Select Tool
-        ↓
-   Execute Tool
-        ↓
-   Observe Results
-        ↓
-   Update Evidence
-        ↓
-   Reason Again
-        ↓
-   Select Next Tool
-        ↓
-   ...
-        ↓
-Sufficient Evidence
-        ↓
-Generate Intelligence
-        ↓
-Actionable Report
 ```
-
-The agent is **not restricted to a fixed sequence** of searches.
-
-For example, one investigation may follow:
-
-```text
-Web Search
-    ↓
-Research Search
-    ↓
-Generate Report
-```
-
-while another may follow:
-
-```text
-Web Search
-    ↓
-Patent Search
-    ↓
-Research Search
-    ↓
-Evidence Analysis
-    ↓
-Generate Report
-```
-
-The next action is selected dynamically by the AI agent.
-
----
-
-# 🎯 Problem
-
-Organizations, startups, and research institutions operate in rapidly changing environments.
-
-Important information is distributed across:
-
-* Scientific publications
-* Patent databases
-* News platforms
-* Competitor websites
-* Industry sources
-* Technology announcements
-* Online sources
-
-Manually monitoring these sources is:
-
-* Time-consuming
-* Difficult to scale
-* Prone to missed information
-* Difficult to analyze consistently
-* Slow for competitive decision-making
-
-ARCIA addresses this problem by autonomously gathering, analyzing, connecting, and interpreting information.
-
----
-
-# 💡 Solution
-
-ARCIA transforms fragmented information into competitive intelligence.
-
-The platform can:
-
-* Monitor competitors
-* Investigate research activity
-* Search patent/IP activity
-* Analyze current web information
-* Detect emerging technology trends
-* Assess competitive threats
-* Identify evidence gaps
-* Generate actionable recommendations
-* Maintain investigation history
-
----
-
-# 🧠 Agentic Intelligence
-
-The core of ARCIA is its autonomous agent.
-
-The agent receives:
-
-```text
-Competitor
-Topic
-Investigation Objective
-```
-
-Example:
-
-```text
-Competitor:
-NVIDIA
-
-Topic:
-Generative AI
-
-Objective:
-Determine NVIDIA's competitive threat and identify emerging opportunities.
-```
-
-The agent then determines what information it needs.
-
-### Example
-
-```text
-🤖 Agent
-
-"I need current competitor activity."
-
-        ↓
-
-🔎 Web Search
-
-        ↓
-
-👁 Observation
-
-"Recent AI infrastructure and product activity detected."
-
-        ↓
-
-🤖 Agent
-
-"I need technical research evidence."
-
-        ↓
-
-📚 Research Search
-
-        ↓
-
-👁 Observation
-
-"Relevant research activity detected."
-
-        ↓
-
-🤖 Agent
-
-"I need intellectual-property evidence."
-
-        ↓
-
-🧪 Patent Search
-
-        ↓
-
-👁 Observation
-
-"Relevant patent activity detected."
-
-        ↓
-
-🤖 Agent
-
-"I have sufficient evidence."
-
-        ↓
-
-📊 Intelligence Report
+REASON → ACT → OBSERVE → REASON → ... → TERMINATE(≤8 steps) → REPORT + Δ
 ```
 
 ---
 
-# 🔎 Intelligence Sources
+## Why no agent framework
 
-ARCIA is designed to work with real-world information sources.
+There's no LangGraph / LangChain / AutoGen here — the orchestrator is ~150
+lines in `agent.ts`: a `while` loop, a discriminated-union tool dispatch, and
+a hard iteration ceiling. That's a deliberate call, not an oversight:
 
-## Web Intelligence
+- **Termination is owned by the host, never the model.** `MAX_ITERATIONS = 8`
+  is enforced outside the LLM's control surface. A graph framework would give
+  you the same guarantee behind an abstraction; here it's one visible `while`
+  condition — auditable in a 10-second read.
+- **Failure is data, not an exception.** Every tool returns a valid
+  evidence-shaped payload whether it succeeded or degraded — the agent
+  reasons over its own tool failures on the next turn instead of the
+  orchestrator special-casing them.
+- Fewer moving parts between "why did the agent do that" and the answer.
 
-Used for:
-
-* Current news
-* Company announcements
-* Product launches
-* Partnerships
-* Industry activity
-* Market developments
-* Competitor movements
-
-## Research Intelligence
-
-Used for:
-
-* Scientific papers
-* Technical publications
-* Research trends
-* Emerging technologies
-* Academic developments
-
-## Patent Intelligence
-
-Used for:
-
-* Patent activity
-* Intellectual-property signals
-* Technology ownership
-* Competitive innovation activity
+If this were multi-agent (parallel sub-investigations, shared scratchpads,
+human-in-the-loop interrupts), LangGraph would earn its keep. At single-agent,
+bounded, four-tool scale, the framework tax isn't worth paying.
 
 ---
 
-# 📊 Intelligence Output
+## Core engineering patterns (actually implemented)
 
-Every completed investigation can produce:
+| Pattern | Where | What it buys |
+|---|---|---|
+| **Bounded ReAct loop** | `agent.ts::runAutonomousInvestigation` | Guaranteed termination independent of model behavior |
+| **Structured decision output** | `Type.OBJECT` schema on every Gemini call | No regex-scraping intent from free text |
+| **Deterministic heuristic fallback** | `getDynamicHeuristicDecision()` | Agent completes an investigation with zero LLM calls if Gemini is fully down |
+| **Model fallback chain** | `gemini.ts::callGeminiSafe` | `gemini-3.7-flash → gemini-3.1-flash-lite` on exhausted retries |
+| **Tool-shedding on 429** | `callGeminiSafe` | Search-grounding quota exhaustion drops the tool, not the request |
+| **Exponential backoff + jitter** | `callGeminiSafe` | `min(2500, 500·1.5^n + rand(0,200))` — avoids thundering herd on retry |
+| **URL-normalized evidence dedup** | `agent.ts::normalizeUrl` | Structural, not model-dependent, integrity |
+| **Cache-aside persistence** | `store.ts → db/supabase.ts` | In-memory Map is source of truth; Postgres writes are async, fire-and-forget, never block the request path |
+| **SSE pub-sub w/ heartbeat** | `server.ts` `/events` | Live agent monitor reflects orchestrator state 1:1, no polling |
+| **Longitudinal delta memory** | `getCompetitorIntelligenceMemory()` + `whatChanged` schema | Every report answers "what changed since last time," not just "what's true now" |
 
-### Threat Assessment
+---
 
-```text
-Threat Score: 91 / 100
-Threat Level: HIGH
-Confidence: 91%
+## System architecture
+
 ```
-
-### Key Developments
-
-Important recent events discovered during the investigation.
-
-### Research Activity
-
-Analysis of relevant scientific and technical activity.
-
-### Patent Activity
-
-Analysis of relevant intellectual-property signals.
-
-### Emerging Trends
-
-Technology and industry themes appearing repeatedly across evidence.
-
-### Competitive Impact
-
-Explanation of why the discovered activity matters.
-
-### Recommended Actions
-
-Actionable strategic recommendations derived from the evidence.
-
-### Evidence Sources
-
-Links to the underlying sources used to generate the intelligence.
-
----
-
-# 🏗️ Architecture
-
-```text
-                     ┌───────────────────┐
-                     │    ARCIA UI       │
-                     │   React Frontend  │
-                     └─────────┬─────────┘
-                               │
-                               ▼
-                     ┌───────────────────┐
-                     │   Server Runtime  │
-                     │    Node.js        │
-                     └─────────┬─────────┘
-                               │
-                               ▼
-                     ┌───────────────────┐
-                     │   AI AGENT        │
-                     │      Gemini       │
-                     └─────────┬─────────┘
-                               │
-               ┌───────────────┼────────────────┐
-               │               │                │
-               ▼               ▼                ▼
-          Web Search      Research Search   Patent Search
-               │               │                │
-               └───────────────┼────────────────┘
-                               ▼
-                     ┌───────────────────┐
-                     │ Evidence Analysis │
-                     └─────────┬─────────┘
-                               │
-                               ▼
-                     ┌───────────────────┐
-                     │ Intelligence      │
-                     │ Report Engine     │
-                     └─────────┬─────────┘
-                               │
-                               ▼
-                     ┌───────────────────┐
-                     │ Supabase / Data   │
-                     │ Persistence       │
-                     └───────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                Browser — React 19 + Vite                        │
+│  api.ts ──fetch(JSON)──▶ Express REST                           │
+│         ──EventSource──▶ /api/investigations/:id/events (SSE)   │
+└──────────────────────────┬───────────────────────────────────────┘
+┌──────────────────────────▼───────────────────────────────────────┐
+│                  server.ts (Express, single process)              │
+│  REST endpoints + SSE fan-out (15s heartbeat) + Vite/static SPA   │
+└──────────────────────────┬───────────────────────────────────────┘
+                            │ fire-and-forget async
+┌──────────────────────────▼───────────────────────────────────────┐
+│              agent.ts — bounded ReAct orchestrator                 │
+│  while step < 8 && status==='running':                            │
+│    decideNextAgentAction() → dispatch tool → dedupe → persist     │
+│    → broadcast SSE event                                          │
+│  on generate_report: synthesize report + delta vs. memory         │
+└───────┬─────────────────────┬─────────────────────┬───────────────┘
+┌───────▼────────┐  ┌─────────▼─────────┐  ┌─────────▼─────────┐
+│   tools.ts      │  │    gemini.ts       │  │    store.ts        │
+│ web/research/   │  │ callGeminiSafe():  │  │ In-memory Maps      │
+│ patent search,  │  │ retry+backoff,     │  │ (source of truth)   │
+│ evidence eval   │  │ model fallback,    │  │ + async write-thru  │
+│ (arXiv + Gemini │  │ tool-shedding,     │  │   to Supabase       │
+│  grounding)     │  │ JSON self-repair   │  └──────────┬───────────┘
+└─────────────────┘  └────────────────────┘             │
+                                              ┌───────────▼──────────┐
+                                              │ db/supabase.ts        │
+                                              │ Postgres (optional)   │
+                                              └────────────────────────┘
 ```
 
 ---
 
-# 🛠️ Technology Stack
+## The agent loop
 
-## Frontend
+`runAutonomousInvestigation()` is the entire orchestration kernel:
 
-* React
-* TypeScript
-* Vite
-* Modern component-based UI
-* Responsive dashboard architecture
+```ts
+const MAX_ITERATIONS = 8;
+while (currentStepNumber < MAX_ITERATIONS && inv.status === 'running') {
+  const decision = await decideNextAgentAction(inv, step, MAX_ITERATIONS, compMemory);
+  // dispatch to search_web | search_research | search_patents |
+  //                analyze_evidence | generate_report
+  // merge + dedupe evidence by normalized URL
+  // persist step, broadcast SSE event
+  await sleep(800); // pacing to avoid upstream rate limits
+}
+```
 
-## AI
+- **Termination is guaranteed by the host**, not the model. If the agent
+  never emits `generate_report`, the loop force-generates one after step 8.
+- **Evidence dedup is structural**: every batch is merged via URL
+  normalization (protocol + lowercased host + trimmed path), with a
+  title-match fallback for redirect/tracking-URL duplicates — outside the
+  LLM's control surface entirely.
+- **Tool failures are non-fatal.** Each tool call has its own `try/catch`
+  inside the loop; a failure produces a synthetic `[TOOL NOTICE]`
+  observation and the loop continues — the agent reasons over its own
+  failures on the next turn instead of crashing the investigation.
+- **State is broadcast at every transition** (`status → step_start →
+  step_complete → complete/error`), not polled — the Live Agent Monitor
+  reflects orchestrator state 1:1 over SSE.
 
-* Google Gemini
-* Gemini tool/function calling
-* Google Search grounding
-* Agentic reasoning and tool selection
+### Decision schema
 
-## Backend
+```ts
+{
+  action: 'search_web' | 'search_research' | 'search_patents'
+        | 'analyze_evidence' | 'generate_report',
+  query: string,
+  decision_summary: string,   // user-facing
+  reason_for_action: string   // internal, not surfaced
+}
+```
 
-* Node.js
-* Server-side API routes/functions
-
-## Database
-
-* Supabase
-* PostgreSQL
-
-## Research
-
-* arXiv or equivalent research APIs
-
-## Web Intelligence
-
-* Google Search grounding
-* Public web sources
-
-## Patent Intelligence
-
-* Public patent sources
-* Targeted web search
+Enforced via Gemini's `responseSchema`, backed by a **pure deterministic
+fallback** (`getDynamicHeuristicDecision`) that inspects evidence composition
+(has web? has research? has patent? analyzed yet?) and picks the next action
+with zero LLM involvement — the agent can complete an investigation even with
+`GEMINI_API_KEY` unset or fully rate-limited.
 
 ---
 
-# 🖥️ Application Pages
+## Tool layer
 
-ARCIA includes the following major application areas:
+| Tool | Grounding source | Retry policy | Total-failure fallback |
+|---|---|---|---|
+| `executeWebSearch` | Gemini `googleSearch` grounding, parses `groundingMetadata.groundingChunks` | 2 attempts, 600ms×n backoff | Synthesized evidence record, `[TOOL NOTICE]`-prefixed |
+| `executeResearchSearch` | **Dual-sourced**: live `export.arxiv.org` Atom feed (5s timeout) + Gemini grounding, merged/deduped by URL | arXiv leg best-effort single-shot; Gemini leg gets 2 retries | Same notice pattern |
+| `executePatentSearch` | Gemini grounding scoped via `site:patents.google.com` rewriting | 2 attempts, 600ms×n backoff | Same notice pattern |
+| `executeAnalyzeEvidence` | Gemini structured JSON (`evidence_sufficient`, `missing_information`, `confidence`) | Inherits `callGeminiSafe` retry | Heuristic: `sufficient = evidence.length >= 3` |
 
-1. Landing Page
-2. Command Center
-3. New Investigation
-4. Live Agent Monitor
-5. Intelligence Report
-6. Competitor Profile
-7. Investigations
-8. Competitors
-9. Topics
-10. Alerts
-11. Reports
-12. Settings
+**Load-bearing principle:** every tool returns a valid evidence-shaped
+payload whether it succeeded or degraded. The orchestrator never has to
+distinguish "tool succeeded" from "tool degraded gracefully" — failure is
+data the agent can reason over, not an exception it has to special-case.
 
 ---
 
-# 🔄 Main User Flow
+## LLM call layer — `callGeminiSafe()`
 
-```text
-Landing Page
-     ↓
-Command Center
-     ↓
-New Investigation
-     ↓
-Enter Competitor
-     ↓
-Enter Topic
-     ↓
-Define Objective
-     ↓
-Start Investigation
-     ↓
-Live Agent Monitor
-     ↓
-Autonomous Investigation
-     ↓
-Evidence Collection
-     ↓
-Intelligence Analysis
-     ↓
-Final Report
-     ↓
-Competitor Profile
+Single hardened chokepoint every prompt routes through, stacking three
+orthogonal strategies:
+
 ```
+for model in [primary, 'gemini-3.1-flash-lite']:     # model fallback
+  for attempt in 0..maxRetries:                        # retry
+    if grounding && attempt === 0: attach googleSearch tool
+    if grounding && attempt  >  0: drop the tool         # tool-shedding
+    generateContent(...)
+    on 429/503: backoff = min(2500, 500·1.5^attempt + jitter)
+    on other error: break → try next model immediately
+```
+
+- **Tool-shedding, not just retrying.** A 429 on the search-grounding tool
+  is a separate quota bucket from base generation — retrying identically
+  just burns another attempt against the same exhausted bucket. Dropping
+  `config.tools` on retry trades grounded citations for availability.
+- **`parseGeminiJson` treats schema-constrained output as a strong prior,
+  not a contract**: strips ` ```json ` fences, brace/bracket-matches to
+  excise the JSON payload from any wrapper text, then falls back to a
+  caller-supplied typed default if parsing still fails.
 
 ---
 
-# 🧪 Example Investigation
+## Persistence model — cache-aside, never blocking
 
-### Input
+The in-memory `Store` (a singleton of `Map`s) is the **authoritative**
+runtime state. Every `store.record*()` call fires a Supabase write
+asynchronously and swallows failures with `.catch(console.warn)`:
 
-```text
-Competitor:
-NVIDIA
-
-Topic:
-Generative AI
-
-Objective:
-Determine NVIDIA's competitive threat and identify emerging opportunities.
+```ts
+public async recordInvestigationState(inv: Investigation): Promise<void> {
+  this.investigations.set(inv.id, inv);           // authoritative, sync
+  if (supabaseDb.isConfigured()) {
+    supabaseDb.saveInvestigation(inv).catch(err => // best-effort, async
+      console.warn('[DB] Supabase investigation save failed:', err));
+  }
+}
 ```
 
-### Agent Investigation
-
-The agent may discover:
-
-* Recent NVIDIA announcements
-* Relevant research publications
-* Patent activity
-* AI infrastructure developments
-* Emerging technology signals
-
-### Output
-
-```text
-Threat Level:
-HIGH
-
-Threat Score:
-91/100
-
-Confidence:
-91%
-
-Emerging Trends:
-- AI infrastructure
-- Autonomous AI agents
-- Multimodal AI
-
-Competitive Impact:
-NVIDIA's continued investment across research,
-infrastructure, and intellectual property indicates
-strong strategic momentum.
-
-Recommended Actions:
-- Monitor NVIDIA's AI infrastructure expansion.
-- Review relevant patent activity.
-- Evaluate product differentiation opportunities.
-```
-
-All conclusions should be supported by collected evidence.
+The app never blocks or fails on DB unavailability — at the cost of state
+not surviving a process restart unless a hydration path is added on boot
+(see Known Limitations).
 
 ---
 
-# 🗃️ Data Model
+## Delta / longitudinal memory engine
 
-## Investigations
+Every investigation loads prior completed reports for that competitor
+(`getCompetitorIntelligenceMemory`) and injects them into **both** the
+decision prompt and the report-generation prompt, with an explicit mandate
+to classify every finding against the baseline:
 
-Stores investigation metadata.
-
-```text
-id
-competitor
-topic
-objective
-status
-created_at
-completed_at
+```
+NEW · INCREASED · UNCHANGED · DECREASED · DISAPPEARED · CONTRADICTED
 ```
 
-## Agent Steps
+Threat score delta is computed as `current − previous`, not restated. This
+turns single-shot intelligence into a genuine time series — the entire
+reason to run this agent on a recurring schedule rather than once.
 
-Stores the investigation process.
+---
 
-```text
-id
-investigation_id
-step_number
-tool
-query
-decision_summary
-observation_summary
-created_at
+## Real-time transport — SSE
+
+```
+GET /api/investigations/:id/events
+  → text/event-stream, no-cache, keep-alive, X-Accel-Buffering: no
+  → initial snapshot event, then pub-sub fan-out per investigation ID
+  → 15s heartbeat comment (': keepalive') to survive cloud proxy idle-timeouts
+  → unsubscribe + res.end() on client disconnect
 ```
 
-## Sources
+Chosen over WebSockets because the data flow is strictly server→client,
+one-directional, and Express + `res.write` needs zero extra dependencies.
 
-Stores collected evidence.
+---
 
-```text
-id
-investigation_id
-source_type
-title
-url
-source_name
-published_at
-summary
-relevance
-confidence
-created_at
+## Resilience posture, end to end
+
+```
+Tool failure     → structured [TOOL NOTICE] observation, loop continues
+Gemini 429/503   → tool-shed → backoff+jitter → model fallback
+JSON malformed   → fence-strip → brace-match extraction → typed fallback
+DB unavailable   → warn + swallow, never blocks the request
+Agent stalls     → hard-stop at step 8, force-generates report anyway
 ```
 
-## Reports
+Nothing in this system can hang the request/response cycle on an upstream
+being flaky. Every dependency has a bounded retry and a typed degrade path.
 
-Stores completed intelligence reports.
+---
 
-```text
-id
-investigation_id
-threat_score
-threat_level
-confidence
-executive_summary
-key_developments
-research_activity
-patent_activity
-news_activity
-emerging_trends
-competitive_impact
-recommendations
-created_at
+## Data model
+
+```
+investigations      — id, competitor, topic, objective, status, timestamps
+agent_steps          — investigation_id, step_number, action, tool, query,
+                        decision_summary, observation_summary, sources_found
+source_evidence      — investigation_id, type(web|research|patent), url,
+                        source, relevance, confidence, tags
+intelligence_reports — threat_score, threat_level, confidence, sub_scores,
+                        key_developments, emerging_trends, what_changed,
+                        competitive_impact, evidence_gaps, recommendations
+threat_alerts        — competitor, title, severity, timestamp
+```
+
+Full DDL in `supabase/schema.sql`.
+
+---
+
+## API surface
+
+```
+GET    /api/health
+GET    /api/stats
+GET    /api/investigations            POST /api/investigations
+GET    /api/investigations/:id
+POST   /api/investigations/:id/run    POST /api/investigations/:id/stop
+GET    /api/investigations/:id/events              (SSE)
+GET    /api/reports                   GET  /api/reports/:id
+GET    /api/competitors               GET  /api/competitors/:name
+GET    /api/topics   GET /api/alerts  POST /api/alerts/:id/read
+GET    /api/trends   GET /api/sources
+GET    /api/watchlist  POST /api/watchlist/toggle
 ```
 
 ---
 
-# 🔐 Security
+## Known limitations
 
-ARCIA follows a server-side API architecture.
-
-API keys and secrets must **never be exposed in frontend code**.
-
-Sensitive credentials should be stored using server-side environment variables or the platform's secure secrets system.
-
-External API calls should be performed server-side.
-
----
-
-# ⚙️ Environment Variables
-
-Typical configuration may include:
-
-```env
-GEMINI_API_KEY=your_gemini_api_key
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
-Additional provider credentials may be required depending on the configured research or patent integrations.
-
-Never commit actual API keys to Git.
+- No state hydration on process restart — in-memory store is cold-started
+  even with Supabase configured; would need a boot-time `SELECT *` pass.
+- arXiv Atom feed is parsed with hand-rolled regex, not an XML parser —
+  fine for a single trusted, stable feed; fragile if the upstream format
+  shifts or more unstructured feeds are added.
+- Single-process orchestration — concurrent investigations share one Node
+  event loop; horizontal scaling would need the loop extracted into a
+  worker/queue (e.g. BullMQ) with the SSE layer fanned out via Redis pub-sub.
 
 ---
 
-# 🚀 Getting Started
+## Stack
 
-## 1. Clone the repository
+**Client:** React 19 · TypeScript · Vite 6 · SSE (`EventSource`)
+**Server:** Express · Node · SSE pub-sub
+**Agent runtime:** custom (no framework) · `@google/genai`
+**Grounding:** Gemini Google Search grounding + live arXiv Atom API
+**Persistence:** In-memory (authoritative) + Supabase/Postgres (write-behind)
 
-```bash
-git clone <repository-url>
-cd arcia
-```
+---
 
-## 2. Install dependencies
+## Quickstart
 
 ```bash
 npm install
-```
-
-## 3. Configure environment variables
-
-Create:
-
-```text
-.env.local
-```
-
-Add the required server-side credentials.
-
-## 4. Start development server
-
-```bash
+cp .env.example .env.local   # GEMINI_API_KEY required; SUPABASE_* optional
 npm run dev
 ```
 
-## 5. Open ARCIA
+## Environment variables
 
-Open the development URL shown by the application.
-
----
-
-# 🧪 Testing
-
-The primary test investigation is:
-
-```text
-Competitor:
-NVIDIA
-
-Topic:
-Generative AI
-
-Objective:
-Determine NVIDIA's competitive threat and identify emerging opportunities.
+```env
+GEMINI_API_KEY=your_gemini_api_key       # required
+APP_URL=http://localhost:3000            # self-referential links
+SUPABASE_URL=your_supabase_url           # optional — enables persistence
+SUPABASE_ANON_KEY=your_supabase_key      # optional
 ```
 
-Additional recommended tests:
 
-```text
-Microsoft
-AI Agents
-```
+## License
 
-and:
-
-```text
-Google
-Multimodal AI
-```
-
-The agent should not necessarily use the same tool sequence for every investigation.
-
----
-
-# ✅ Core Success Criteria
-
-ARCIA is considered functional when:
-
-* [x] Existing UI is preserved
-* [x] Investigation can be created
-* [x] Real AI agent can start
-* [x] Agent dynamically selects tools
-* [x] Web intelligence can be collected
-* [x] Research information can be collected
-* [x] Patent information can be investigated
-* [x] Agent observes tool results
-* [x] Agent can choose another tool
-* [x] Agent can determine when enough evidence exists
-* [x] Final intelligence report can be generated
-* [x] Sources are retained
-* [x] Threat assessment is generated
-* [x] Emerging trends are identified
-* [x] Recommendations are generated
-* [x] Investigation history can be stored
-* [x] API keys remain server-side
-
----
-
-# 🎯 Why ARCIA Is Different
-
-Traditional monitoring systems generally follow:
-
-```text
-Search
-→ Collect
-→ Display
-```
-
-ARCIA follows:
-
-```text
-Investigate
-→ Decide
-→ Search
-→ Observe
-→ Reassess
-→ Investigate Further
-→ Connect Evidence
-→ Determine Significance
-→ Recommend Action
-```
-
-The goal is not to give users **more information**.
-
-The goal is to give them **better intelligence**.
-
----
-
-# 🏆 Hackathon Demonstration
-
-The recommended live demonstration is:
-
-```text
-1. Open ARCIA
-
-2. Select:
-   NVIDIA
-
-3. Select:
-   Generative AI
-
-4. Enter:
-   Determine competitive threat and emerging opportunities.
-
-5. Start Investigation.
-
-6. Show the autonomous agent selecting tools.
-
-7. Show real internet evidence being collected.
-
-8. Show the agent reassessing the evidence.
-
-9. Show the final intelligence report.
-
-10. Show:
-    Threat Score
-    Emerging Trends
-    Competitive Impact
-    Recommended Actions
-    Evidence Sources
-```
-
-The key demonstration is:
-
-```text
-REASON
-   ↓
-ACT
-   ↓
-OBSERVE
-   ↓
-REASON AGAIN
-   ↓
-ACT
-   ↓
-OBSERVE
-   ↓
-COMPLETE
-```
-
----
-
-# 🔮 Future Roadmap
-
-Potential future capabilities include:
-
-* Continuous autonomous monitoring
-* Scheduled investigations
-* Email/Slack alerts
-* Advanced patent analytics
-* Social media intelligence
-* Multi-agent collaboration
-* Competitive strategy simulation
-* Personalized intelligence feeds
-* Automated executive briefings
-* Historical trend forecasting
-* Industry-wide competitive maps
-* Knowledge graphs
-* Cross-competitor comparisons
-
----
-
-# 📜 License
-
-This project is currently intended for educational, research, and hackathon development.
-
----
-
-## ARCIA
-
-**Autonomous Intelligence. Competitive Advantage.**
-
-> Don't just monitor the world.
-> Understand where it is going.
+Educational / research / hackathon use.
