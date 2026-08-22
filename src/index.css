@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@layer base {
+  * {
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* Elegant Dark scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f1f24;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c5a059;
+}
+
+/* Elegant Glow effects */
+.glow-gold {
+  box-shadow: 0 0 25px -4px rgba(197, 160, 89, 0.35);
+}
+
+.glow-gold-subtle {
+  box-shadow: 0 0 15px -3px rgba(197, 160, 89, 0.18);
+}
+
+.glow-blue {
+  box-shadow: 0 0 25px -5px rgba(197, 160, 89, 0.3);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 25px -5px rgba(223, 186, 115, 0.25);
+}
+
+.glow-red {
+  box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.25);
+}
+
+/* Radar pulse animation */
+@keyframes radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.animate-radar {
+  animation: radar-sweep 5s linear infinite;
+}
+
+/* Elegant Dark architectural dot grid background */
+.bg-cyber-grid {
+  background-color: #0a0a0b;
+  background-image: 
+    radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.bg-dot-pattern {
+  background-image: radial-gradient(rgba(197, 160, 89, 0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Font utility classes */
+.font-editorial {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.font-cinzel {
+  font-family: 'Cinzel', serif;
+}
+

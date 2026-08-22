@@ -1,0 +1,6 @@
+{
+  "name": "ARCIA - AI Research & Competitive Intelligence Agent",
+  "description": "Autonomous AI research and competitive intelligence agent with real-time ReAct loop, live agent monitor, multi-source evidence grounding (Web, Research, Patents), threat analysis, and actionable intelligence reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
