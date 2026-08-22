@@ -35,6 +35,44 @@ export interface AgentStep {
   status: 'thinking' | 'executing' | 'completed' | 'failed';
 }
 
+export interface HistoricalThreatPoint {
+  investigationId: string;
+  timestamp: string;
+  date: string;
+  topic: string;
+  threatScore: number;
+  threatLevel: ThreatLevel;
+  keyDriver?: string;
+}
+
+export interface ChangeDeltaItem {
+  id: string;
+  category: 'product' | 'research' | 'patent' | 'strategy' | 'market' | 'partnership';
+  title: string;
+  status: 'NEW' | 'INCREASED' | 'UNCHANGED' | 'DECREASED' | 'DISAPPEARED' | 'CONTRADICTED';
+  description: string;
+  significance: 'High' | 'Medium' | 'Low';
+  previousBaseline?: string;
+  currentEvidence?: string;
+  sourceUrl?: string;
+}
+
+export interface WhatChangedAnalysis {
+  hasPreviousBaseline: boolean;
+  previousInvestigationId?: string;
+  previousInvestigationDate?: string;
+  previousThreatScore?: number;
+  currentThreatScore: number;
+  threatScoreDelta: number; // e.g. +15 or -4
+  threatScoreSummary: string; // "Increased by +15 points from 71 to 86 due to new research signals..."
+  summary: string;
+  keyChanges: ChangeDeltaItem[];
+  stableSignals: string[];
+  newSignals: string[];
+  contradictionsOrShifts: string[];
+  newRecommendations: string[];
+}
+
 export interface IntelligenceReport {
   id: string;
   investigationId: string;
@@ -47,6 +85,8 @@ export interface IntelligenceReport {
   executiveSummary: string;
   finalAssessment: string;
   investigationPeriod: string;
+  whatChanged?: WhatChangedAnalysis;
+  threatHistory?: HistoricalThreatPoint[];
   subScores: {
     researchActivity: { score: number; level: string; change: string };
     patentActivity: { score: number; level: string; change: string };
@@ -144,6 +184,9 @@ export interface Competitor {
   activeInvestigations: number;
   recentAlerts: number;
   activityTrend: number[];
+  threatHistory?: HistoricalThreatPoint[];
+  lastInvestigated?: string;
+  historicalInvestigationsCount?: number;
   strategicFocus: string[];
   keyProducts: Array<{
     name: string;

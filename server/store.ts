@@ -55,11 +55,74 @@ export class Store {
 
   public async recordIntelligenceReport(report: IntelligenceReport): Promise<void> {
     this.reports.set(report.id, report);
+    
+    // Update persistent competitor memory with new historical threat point
+    const comp = Array.from(this.competitors.values()).find(
+      c => c.name.toLowerCase() === report.competitor.toLowerCase()
+    );
+    if (comp) {
+      if (!comp.threatHistory) {
+        comp.threatHistory = [];
+      }
+      const existingIdx = comp.threatHistory.findIndex(h => h.investigationId === report.investigationId);
+      const newPoint = {
+        investigationId: report.investigationId,
+        timestamp: new Date().toISOString(),
+        date: new Date().toISOString().slice(0, 10),
+        topic: report.topic,
+        threatScore: report.threatScore,
+        threatLevel: report.threatLevel,
+        keyDriver: report.executiveSummary ? (report.executiveSummary.slice(0, 95) + '...') : undefined
+      };
+      if (existingIdx >= 0) {
+        comp.threatHistory[existingIdx] = newPoint;
+      } else {
+        comp.threatHistory.push(newPoint);
+      }
+      comp.threatScore = report.threatScore;
+      comp.threatLevel = report.threatLevel;
+      comp.lastInvestigated = new Date().toISOString();
+      comp.activityTrend = [...comp.activityTrend.slice(1), report.threatScore];
+      comp.historicalInvestigationsCount = (comp.historicalInvestigationsCount || 0) + 1;
+      report.threatHistory = comp.threatHistory;
+    }
+
     if (supabaseDb.isConfigured()) {
       supabaseDb.saveIntelligenceReport(report).catch(err => {
         console.warn('[DB] Supabase report save failed:', err);
       });
     }
+  }
+
+  public getCompetitorIntelligenceMemory(competitorName: string) {
+    const comp = Array.from(this.competitors.values()).find(
+      c => c.name.toLowerCase() === competitorName.toLowerCase()
+    );
+
+    // Retrieve previous completed investigations for this competitor
+    const completedInvs = Array.from(this.investigations.values())
+      .filter(i => i.competitor.toLowerCase() === competitorName.toLowerCase() && (i.status === 'completed' || i.reportId))
+      .sort((a, b) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime());
+
+    const latestInv = completedInvs[0];
+    const latestReport = latestInv?.reportId ? this.reports.get(latestInv.reportId) : latestInv?.report;
+
+    return {
+      competitor: comp || null,
+      previousInvestigationsCount: completedInvs.length,
+      previousInvestigations: completedInvs.map(i => ({
+        id: i.id,
+        topic: i.topic,
+        objective: i.objective,
+        createdAt: i.createdAt,
+        completedAt: i.completedAt,
+        threatScore: i.report?.threatScore,
+        threatLevel: i.report?.threatLevel,
+        reportId: i.reportId
+      })),
+      latestReport: latestReport || null,
+      threatHistory: comp?.threatHistory || []
+    };
   }
 
 
@@ -146,6 +209,37 @@ export class Store {
       activeInvestigations: 4,
       recentAlerts: 3,
       activityTrend: [65, 72, 80, 85, 91, 94],
+      lastInvestigated: '2026-05-14T09:00:00Z',
+      historicalInvestigationsCount: 3,
+      threatHistory: [
+        {
+          investigationId: 'INV-2026-7210',
+          timestamp: '2026-01-15T14:20:00Z',
+          date: '2026-01-15',
+          topic: 'Generative AI Hardware & Architecture',
+          threatScore: 78,
+          threatLevel: 'HIGH',
+          keyDriver: 'Initial TSMC packaging commitments and Blackwell architectural tape-out.'
+        },
+        {
+          investigationId: 'INV-2026-8104',
+          timestamp: '2026-03-02T10:15:00Z',
+          date: '2026-03-02',
+          topic: 'Generative AI & LLM Inference Acceleration',
+          threatScore: 86,
+          threatLevel: 'HIGH',
+          keyDriver: 'NVLink 5.0 high-bandwidth interconnects and FP4 quantization dynamics.'
+        },
+        {
+          investigationId: 'INV-2026-8942',
+          timestamp: '2026-05-14T09:00:00Z',
+          date: '2026-05-14',
+          topic: 'Next-Gen AI Silicon & Accelerators (Blackwell B200 / Rubin)',
+          threatScore: 91,
+          threatLevel: 'CRITICAL',
+          keyDriver: 'Blackwell commercial shipping and 100k+ GPU cluster topology patents.'
+        }
+      ],
       strategicFocus: [
         'Blackwell B200 / B100 4nm GPU Architecture',
         'Next-gen Vera Rubin 3nm AI Platform (2026)',
@@ -199,6 +293,28 @@ export class Store {
       activeInvestigations: 3,
       recentAlerts: 2,
       activityTrend: [60, 68, 74, 82, 85, 89],
+      lastInvestigated: '2026-03-10T16:30:00Z',
+      historicalInvestigationsCount: 2,
+      threatHistory: [
+        {
+          investigationId: 'INV-2026-6910',
+          timestamp: '2026-01-20T11:00:00Z',
+          date: '2026-01-20',
+          topic: 'Multimodal AI Frontier Reasoning',
+          threatScore: 82,
+          threatLevel: 'HIGH',
+          keyDriver: 'Gemini 2.0 Flash release and TPU v6e cloud deployment.'
+        },
+        {
+          investigationId: 'INV-2026-7850',
+          timestamp: '2026-03-10T16:30:00Z',
+          date: '2026-03-10',
+          topic: 'Multimodal AI & Autonomous Agents',
+          threatScore: 89,
+          threatLevel: 'HIGH',
+          keyDriver: 'DeepMind AlphaFold 3 release & OCS optical circuit switching patent grant.'
+        }
+      ],
       strategicFocus: [
         'Gemini 2.0 / 3.0 Multimodal Native Reasoning Models',
         'TPU v6e (Trillium) Cloud Silicon Deployment',
@@ -248,6 +364,28 @@ export class Store {
       activeInvestigations: 3,
       recentAlerts: 2,
       activityTrend: [70, 78, 84, 89, 90, 92],
+      lastInvestigated: '2026-03-25T14:45:00Z',
+      historicalInvestigationsCount: 2,
+      threatHistory: [
+        {
+          investigationId: 'INV-2026-6540',
+          timestamp: '2026-01-18T10:00:00Z',
+          date: '2026-01-18',
+          topic: 'AI Agents & Frontier Reasoning',
+          threatScore: 87,
+          threatLevel: 'HIGH',
+          keyDriver: 'OpenAI o1 reasoning rollout and enterprise API expansions.'
+        },
+        {
+          investigationId: 'INV-2026-8020',
+          timestamp: '2026-03-25T14:45:00Z',
+          date: '2026-03-25',
+          topic: 'Autonomous Computer-Use & Agent Systems',
+          threatScore: 92,
+          threatLevel: 'CRITICAL',
+          keyDriver: 'Operator autonomous GUI agent demonstrations and reasoning token scaling.'
+        }
+      ],
       strategicFocus: [
         'o1 / o3 Extended Test-Time Reasoning Architectures',
         'Operator Autonomous GUI & Computer-Use Agents',

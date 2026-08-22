@@ -14,7 +14,10 @@ import {
   Square,
   Search,
   Database,
-  Radio
+  Radio,
+  Download,
+  Check,
+  ShieldCheck
 } from 'lucide-react';
 import { Investigation, AgentStep, SourceEvidence } from '../types';
 import { api } from '../api';
@@ -33,6 +36,8 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [isLiveConnected, setIsLiveConnected] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'timeline' | 'evidence' | 'telemetry'>('timeline');
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportSuccess, setExportSuccess] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -122,6 +127,91 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
     }
   };
 
+  const handleDownloadInvestigation = () => {
+    if (!investigation) return;
+    setIsExporting(true);
+    try {
+      const fullAuditState = {
+        auditMetadata: {
+          exportedAt: new Date().toISOString(),
+          formatVersion: "1.0.0-audit",
+          orchestrator: "ARCIA Autonomous Multi-Vector Engine",
+          targetCompetitor: investigation.competitor,
+          topic: investigation.topic,
+          priority: investigation.priority,
+          timeRange: investigation.timeRange,
+          lifecycleStatus: investigation.status,
+          totalReActSteps: investigation.steps.length,
+          totalCollectedSources: investigation.evidence.length,
+          hasSynthesisReport: Boolean(investigation.report || investigation.reportId),
+        },
+        investigationState: {
+          id: investigation.id,
+          competitor: investigation.competitor,
+          topic: investigation.topic,
+          objective: investigation.objective,
+          timeRange: investigation.timeRange,
+          priority: investigation.priority,
+          status: investigation.status,
+          startedAt: investigation.startedAt,
+          completedAt: investigation.completedAt,
+          currentAction: investigation.currentAction,
+          currentDecision: investigation.currentDecision,
+          progress: investigation.progress,
+          insights: investigation.insights,
+          reportId: investigation.reportId,
+          report: investigation.report,
+        },
+        reactExecutionTrace: investigation.steps.map(step => ({
+          stepNumber: step.stepNumber,
+          stepId: step.id,
+          timestamp: step.timestamp,
+          durationMs: step.durationMs,
+          status: step.status,
+          thought: step.thought,
+          decisionSummary: step.decisionSummary,
+          action: step.action,
+          tool: step.tool,
+          query: step.query,
+          observationSummary: step.observationSummary,
+          sourcesFoundCount: step.sourcesFound,
+          toolResults: step.sources || [],
+        })),
+        groundedSourcesAndEvidence: investigation.evidence.map(ev => ({
+          id: ev.id,
+          investigationId: ev.investigationId,
+          type: ev.type,
+          title: ev.title,
+          url: ev.url,
+          source: ev.source,
+          publishedAt: ev.publishedAt,
+          authors: ev.authors || [],
+          abstract: ev.abstract || null,
+          summary: ev.summary,
+          relevanceScore: ev.relevance,
+          confidenceScore: ev.confidence,
+          tags: ev.tags || [],
+        })),
+      };
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullAuditState, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      const safeCompetitor = investigation.competitor.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      downloadAnchor.setAttribute("download", `investigation-${investigation.id}-${safeCompetitor}-audit.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 2500);
+    } catch (err) {
+      console.error('Failed to export investigation audit state:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const getToolIcon = (tool: string) => {
     const t = tool.toLowerCase();
     if (t.includes('web')) return Globe;
@@ -189,11 +279,40 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
           </div>
 
           {/* Action CTAs */}
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 flex-shrink-0">
+            {/* Download Investigation Audit Button */}
+            <button
+              onClick={handleDownloadInvestigation}
+              disabled={isExporting}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border ${
+                exportSuccess
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm'
+                  : 'bg-white/[0.03] hover:bg-white/[0.08] text-white/80 hover:text-white border-white/10 hover:border-white/20'
+              }`}
+              title="Export complete investigation state, ReAct steps, and evidence records as JSON for external audit"
+            >
+              {exportSuccess ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>State Exported</span>
+                </>
+              ) : isExporting ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
+                  <span>Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5 text-[#c5a059]" />
+                  <span>Download Investigation</span>
+                </>
+              )}
+            </button>
+
             {isRunning && (
               <button
                 onClick={handleStop}
-                className="flex items-center gap-2 px-4 py-2 rounded bg-white/[0.02] hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-white/60 hover:text-red-400 text-xs font-medium tracking-wide uppercase transition-all"
+                className="flex items-center gap-2 px-3.5 py-2 rounded bg-white/[0.02] hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-white/60 hover:text-red-400 text-xs font-mono tracking-wider uppercase transition-all"
               >
                 <Square className="w-3.5 h-3.5" />
                 <span>Halt Sequence</span>
@@ -203,7 +322,7 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
             {(isCompleted || investigation.reportId) && (
               <button
                 onClick={() => onViewReport(investigation.reportId)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded bg-[#c5a059] hover:bg-[#d6b26b] text-black text-xs font-semibold uppercase tracking-wider shadow-md shadow-[#c5a059]/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                className="flex items-center gap-2 px-4 py-2 rounded bg-[#c5a059] hover:bg-[#d6b26b] text-black text-xs font-semibold uppercase tracking-wider shadow-md shadow-[#c5a059]/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
               >
                 <Sparkles className="w-3.5 h-3.5 text-black" />
                 <span>Examine Synthesis Report</span>
@@ -367,25 +486,39 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
           )}
 
           {activeTab === 'telemetry' && (
-            <div className="p-4 rounded-lg bg-[#060608] border border-white/5 font-mono text-xs text-white/60 max-h-[600px] overflow-y-auto space-y-2">
-              <p className="text-[#c5a059]">[INIT] Autonomous Agent runtime active. Bound model: gemini-3.7-flash.</p>
-              <p className="text-white/30">[CONFIG] Objective: "{investigation.objective}"</p>
-              {investigation.steps.map((s, i) => (
-                <div key={i} className="space-y-1 py-1 border-b border-white/[0.02]">
-                  <p className="text-white/90">
-                    [{s.timestamp.slice(11, 19)}] STEP_{s.stepNumber} DECISION: {s.decisionSummary}
-                  </p>
-                  <p className="text-[#c5a059]">
-                    &gt; INVOKE_TOOL: {s.action} | Query: "{s.query}"
-                  </p>
-                  <p className="text-white/50">
-                    &lt; OBSERVATION: {s.observationSummary} ({s.sourcesFound} sources grounded)
-                  </p>
-                </div>
-              ))}
-              {isCompleted && (
-                <p className="text-emerald-400 font-medium">[COMPLETE] Final intelligence dossier synthesized. Ready for review.</p>
-              )}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                <span className="text-xs text-white/60 font-mono">Real-Time Autonomous Agent Event Log & Trace Stream</span>
+                <button
+                  onClick={handleDownloadInvestigation}
+                  disabled={isExporting}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded bg-[#c5a059]/10 hover:bg-[#c5a059]/20 border border-[#c5a059]/30 text-[#c5a059] text-[10px] font-mono uppercase tracking-wider transition-all"
+                >
+                  <Download className="w-3 h-3 text-[#c5a059]" />
+                  <span>Download Audit JSON</span>
+                </button>
+              </div>
+
+              <div className="p-4 rounded-lg bg-[#060608] border border-white/5 font-mono text-xs text-white/60 max-h-[540px] overflow-y-auto space-y-2">
+                <p className="text-[#c5a059]">[INIT] Autonomous Agent runtime active. Bound model: gemini-3.7-flash.</p>
+                <p className="text-white/30">[CONFIG] Objective: "{investigation.objective}"</p>
+                {investigation.steps.map((s, i) => (
+                  <div key={i} className="space-y-1 py-1.5 border-b border-white/[0.03]">
+                    <p className="text-white/90">
+                      [{s.timestamp.slice(11, 19)}] STEP_{s.stepNumber} DECISION: {s.decisionSummary}
+                    </p>
+                    <p className="text-[#c5a059]">
+                      &gt; INVOKE_TOOL: {s.action} | Query: "{s.query}"
+                    </p>
+                    <p className="text-white/50">
+                      &lt; OBSERVATION: {s.observationSummary} ({s.sourcesFound} sources grounded)
+                    </p>
+                  </div>
+                ))}
+                {isCompleted && (
+                  <p className="text-emerald-400 font-medium pt-1">[COMPLETE] Final intelligence dossier synthesized. Ready for review & external audit.</p>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -423,8 +556,9 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
                       {ev.type}
                     </span>
 
-                    <span className="text-[10px] text-white/40 font-mono">
-                      Conf: {ev.confidence}%
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-mono">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>{ev.confidence || 95}% Conf</span>
                     </span>
                   </div>
 
