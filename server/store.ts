@@ -7,8 +7,10 @@ import {
   EmergingTrendItem,
   SourceEvidence,
   DashboardStats,
-  InvestigationEvent
+  InvestigationEvent,
+  AgentStep
 } from '../src/types';
+import { supabaseDb } from './db/supabase';
 
 export class Store {
   investigations: Map<string, Investigation> = new Map();
@@ -25,6 +27,41 @@ export class Store {
   constructor() {
     this.seedData();
   }
+
+  public async recordInvestigationState(inv: Investigation): Promise<void> {
+    this.investigations.set(inv.id, inv);
+    if (supabaseDb.isConfigured()) {
+      supabaseDb.saveInvestigation(inv).catch(err => {
+        console.warn('[DB] Supabase investigation save failed:', err);
+      });
+    }
+  }
+
+  public async recordAgentStep(step: AgentStep): Promise<void> {
+    if (supabaseDb.isConfigured()) {
+      supabaseDb.saveAgentStep(step).catch(err => {
+        console.warn('[DB] Supabase step save failed:', err);
+      });
+    }
+  }
+
+  public async recordEvidence(evidence: SourceEvidence): Promise<void> {
+    if (supabaseDb.isConfigured()) {
+      supabaseDb.saveEvidence(evidence).catch(err => {
+        console.warn('[DB] Supabase evidence save failed:', err);
+      });
+    }
+  }
+
+  public async recordIntelligenceReport(report: IntelligenceReport): Promise<void> {
+    this.reports.set(report.id, report);
+    if (supabaseDb.isConfigured()) {
+      supabaseDb.saveIntelligenceReport(report).catch(err => {
+        console.warn('[DB] Supabase report save failed:', err);
+      });
+    }
+  }
+
 
   public subscribeToInvestigation(
     investigationId: string,

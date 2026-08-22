@@ -36,6 +36,8 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let pollInterval: any = null;
+
     // 1. Fetch initial state
     api.getInvestigation(investigationId).then(data => {
       setInvestigation(data);
@@ -46,6 +48,10 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
 
     eventSource.onopen = () => {
       setIsLiveConnected(true);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
     };
 
     eventSource.onmessage = (e) => {
@@ -82,9 +88,21 @@ export const LiveAgentMonitor: React.FC<LiveAgentMonitorProps> = ({
 
     eventSource.onerror = () => {
       setIsLiveConnected(false);
+      // Start fallback polling if SSE is interrupted
+      if (!pollInterval) {
+        pollInterval = setInterval(() => {
+          api.getInvestigation(investigationId).then(data => {
+            setInvestigation(data);
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'stopped') {
+              clearInterval(pollInterval);
+            }
+          }).catch(() => {});
+        }, 2000);
+      }
     };
 
     return () => {
+      if (pollInterval) clearInterval(pollInterval);
       eventSource.close();
     };
   }, [investigationId]);

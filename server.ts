@@ -46,8 +46,8 @@ async function startServer() {
     res.json(inv);
   });
 
-  app.post('/api/investigations', (req, res) => {
-    const { competitor, topic, objective, timeRange, priority } = req.body;
+  app.post('/api/investigations', async (req, res) => {
+    const { competitor, topic, objective, timeRange, priority, autoRun } = req.body;
     if (!competitor || !topic || !objective) {
       return res.status(400).json({ error: 'competitor, topic, and objective are required.' });
     }
@@ -70,6 +70,14 @@ async function startServer() {
     };
 
     store.investigations.set(id, newInv);
+    await store.recordInvestigationState(newInv);
+
+    if (autoRun) {
+      runAutonomousInvestigation(id).catch(err => {
+        console.error(`Autonomous investigation ${id} failed:`, err);
+      });
+    }
+
     res.status(201).json(newInv);
   });
 
@@ -112,18 +120,33 @@ async function startServer() {
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
     // Send initial snapshot
     res.write(`data: ${JSON.stringify({ type: 'initial', investigation: inv })}\n\n`);
 
     const unsubscribe = store.subscribeToInvestigation(id, event => {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch (err) {
+        console.error('SSE write error:', err);
+      }
     });
 
+    // 15-second heartbeat ping to keep connection alive through cloud proxies
+    const heartbeatInterval = setInterval(() => {
+      try {
+        res.write(': keepalive\n\n');
+      } catch (e) {
+        clearInterval(heartbeatInterval);
+      }
+    }, 15000);
+
     req.on('close', () => {
+      clearInterval(heartbeatInterval);
       unsubscribe();
       res.end();
     });

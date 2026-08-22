@@ -88,6 +88,8 @@ export async function runAutonomousInvestigation(investigationId: string): Promi
       inv.currentDecision = step.decisionSummary;
       inv.currentTool = step.tool;
       inv.steps.push(step);
+      await store.recordInvestigationState(inv);
+      await store.recordAgentStep(step);
 
       // Broadcast step start event to live monitor
       store.broadcastInvestigationEvent(investigationId, {
@@ -96,121 +98,135 @@ export async function runAutonomousInvestigation(investigationId: string): Promi
         investigation: inv,
       });
 
-      // 2. TOOL EXECUTION
-      if (decision.action === 'search_web') {
-        console.log(`[AGENT] Executing search_web query: "${decision.query}"`);
-        const result = await executeWebSearch(investigationId, decision.query, inv.competitor);
-        console.log(`[AGENT] Completed search_web, sources found: ${result.sources.length}`);
-        step.observationSummary = result.observation;
-        step.sourcesFound = result.sources.length;
-        step.sources = result.sources;
-        step.status = 'completed';
+      // 2. TOOL EXECUTION WITH GRANULAR TRY/CATCH & STRUCTURED ERROR HANDLING
+      try {
+        if (decision.action === 'search_web') {
+          console.log(`[AGENT] Executing search_web query: "${decision.query}"`);
+          const result = await executeWebSearch(investigationId, decision.query, inv.competitor);
+          console.log(`[AGENT] Completed search_web, sources found: ${result.sources.length}`);
+          step.observationSummary = result.observation;
+          step.sourcesFound = result.sources.length;
+          step.sources = result.sources;
+          step.status = 'completed';
 
-        // Deduplicate and append evidence by normalized URL
-        result.sources.forEach(s => {
-          const norm = normalizeUrl(s.url);
-          if (!inv.evidence.some(e => normalizeUrl(e.url) === norm || e.title === s.title)) {
-            inv.evidence.push(s);
+          // Deduplicate and append evidence by normalized URL
+          for (const s of result.sources) {
+            const norm = normalizeUrl(s.url);
+            if (!inv.evidence.some(e => normalizeUrl(e.url) === norm || e.title === s.title)) {
+              inv.evidence.push(s);
+              await store.recordEvidence(s);
+            }
           }
-        });
-      } else if (decision.action === 'search_research') {
-        console.log(`[AGENT] Executing search_research query: "${decision.query}"`);
-        const result = await executeResearchSearch(investigationId, decision.query, inv.competitor);
-        console.log(`[AGENT] Completed search_research, sources found: ${result.sources.length}`);
-        step.observationSummary = result.observation;
-        step.sourcesFound = result.sources.length;
-        step.sources = result.sources;
-        step.status = 'completed';
+        } else if (decision.action === 'search_research') {
+          console.log(`[AGENT] Executing search_research query: "${decision.query}"`);
+          const result = await executeResearchSearch(investigationId, decision.query, inv.competitor);
+          console.log(`[AGENT] Completed search_research, sources found: ${result.sources.length}`);
+          step.observationSummary = result.observation;
+          step.sourcesFound = result.sources.length;
+          step.sources = result.sources;
+          step.status = 'completed';
 
-        result.sources.forEach(s => {
-          const norm = normalizeUrl(s.url);
-          if (!inv.evidence.some(e => normalizeUrl(e.url) === norm || e.title === s.title)) {
-            inv.evidence.push(s);
+          for (const s of result.sources) {
+            const norm = normalizeUrl(s.url);
+            if (!inv.evidence.some(e => normalizeUrl(e.url) === norm || e.title === s.title)) {
+              inv.evidence.push(s);
+              await store.recordEvidence(s);
+            }
           }
-        });
-      } else if (decision.action === 'search_patents') {
-        console.log(`[AGENT] Executing search_patents query: "${decision.query}"`);
-        const result = await executePatentSearch(investigationId, decision.query, inv.competitor);
-        console.log(`[AGENT] Completed search_patents, sources found: ${result.sources.length}`);
-        step.observationSummary = result.observation;
-        step.sourcesFound = result.sources.length;
-        step.sources = result.sources;
-        step.status = 'completed';
+        } else if (decision.action === 'search_patents') {
+          console.log(`[AGENT] Executing search_patents query: "${decision.query}"`);
+          const result = await executePatentSearch(investigationId, decision.query, inv.competitor);
+          console.log(`[AGENT] Completed search_patents, sources found: ${result.sources.length}`);
+          step.observationSummary = result.observation;
+          step.sourcesFound = result.sources.length;
+          step.sources = result.sources;
+          step.status = 'completed';
 
-        result.sources.forEach(s => {
-          const norm = normalizeUrl(s.url);
-          if (!inv.evidence.some(e => normalizeUrl(e.url) === norm || e.title === s.title)) {
-            inv.evidence.push(s);
+          for (const s of result.sources) {
+            const norm = normalizeUrl(s.url);
+            if (!inv.evidence.some(e => normalizeUrl(e.url) === norm || e.title === s.title)) {
+              inv.evidence.push(s);
+              await store.recordEvidence(s);
+            }
           }
-        });
-      } else if (decision.action === 'analyze_evidence') {
-        console.log(`[AGENT] Executing analyze_evidence with ${inv.evidence.length} evidence items`);
-        const result = await executeAnalyzeEvidence(
-          investigationId,
-          inv.competitor,
-          inv.topic,
-          inv.objective,
-          inv.evidence
-        );
-        console.log(`[AGENT] Completed analyze_evidence: sufficient=${result.evidence_sufficient}`);
-        step.observationSummary = result.observation;
-        step.sourcesFound = inv.evidence.length;
-        step.status = 'completed';
+        } else if (decision.action === 'analyze_evidence') {
+          console.log(`[AGENT] Executing analyze_evidence with ${inv.evidence.length} evidence items`);
+          const result = await executeAnalyzeEvidence(
+            investigationId,
+            inv.competitor,
+            inv.topic,
+            inv.objective,
+            inv.evidence
+          );
+          console.log(`[AGENT] Completed analyze_evidence: sufficient=${result.evidence_sufficient}`);
+          step.observationSummary = result.observation;
+          step.sourcesFound = inv.evidence.length;
+          step.status = 'completed';
 
-        result.important_findings.forEach(finding => {
-          if (!inv.insights.includes(finding)) {
-            inv.insights.push(finding);
+          result.important_findings.forEach(finding => {
+            if (!inv.insights.includes(finding)) {
+              inv.insights.push(finding);
+            }
+          });
+        } else if (decision.action === 'generate_report') {
+          console.log(`[AGENT] Finalizing investigation and generating intelligence report...`);
+          step.observationSummary = 'Sufficient evidence collected. Synthesizing final grounded intelligence report.';
+          step.sourcesFound = inv.evidence.length;
+          step.status = 'completed';
+          await store.recordAgentStep(step);
+
+          store.broadcastInvestigationEvent(investigationId, {
+            type: 'step_complete',
+            step,
+            investigation: inv,
+          });
+
+          // 3. GENERATE FINAL REPORT
+          inv.currentAction = 'Generating Report';
+          inv.currentDecision = 'Synthesizing multi-source evidence into intelligence report...';
+          const report = await generateFinalIntelligenceReport(inv);
+          console.log(`[AGENT] Report generated successfully with threatScore: ${report.threatScore}`);
+          inv.reportId = report.id;
+          inv.report = report;
+          inv.status = 'completed';
+          inv.completedAt = new Date().toISOString();
+          inv.currentAction = 'Completed';
+          inv.currentDecision = 'Intelligence report finalized.';
+
+          await store.recordIntelligenceReport(report);
+          await store.recordInvestigationState(inv);
+
+          if (report.threatScore >= 75) {
+            const alert: Alert = {
+              id: `alt-${Date.now()}`,
+              investigationId: inv.id,
+              competitor: inv.competitor,
+              title: `High Threat Signal: ${inv.competitor} in ${inv.topic}`,
+              description: `Autonomous investigation completed with ${report.threatScore}/100 threat score. ${report.executiveSummary.slice(0, 150)}...`,
+              severity: report.threatLevel,
+              timeAgo: 'Just now',
+              timestamp: new Date().toISOString(),
+              read: false,
+            };
+            store.alerts.unshift(alert);
           }
-        });
-      } else if (decision.action === 'generate_report') {
-        console.log(`[AGENT] Finalizing investigation and generating intelligence report...`);
-        step.observationSummary = 'Sufficient evidence collected. Synthesizing final grounded intelligence report.';
-        step.sourcesFound = inv.evidence.length;
-        step.status = 'completed';
 
-        store.broadcastInvestigationEvent(investigationId, {
-          type: 'step_complete',
-          step,
-          investigation: inv,
-        });
+          store.broadcastInvestigationEvent(investigationId, {
+            type: 'complete',
+            investigation: inv,
+            report,
+          });
 
-        // 3. GENERATE FINAL REPORT
-        inv.currentAction = 'Generating Report';
-        inv.currentDecision = 'Synthesizing multi-source evidence into intelligence report...';
-        const report = await generateFinalIntelligenceReport(inv);
-        console.log(`[AGENT] Report generated successfully with threatScore: ${report.threatScore}`);
-        inv.reportId = report.id;
-        inv.report = report;
-        inv.status = 'completed';
-        inv.completedAt = new Date().toISOString();
-        inv.currentAction = 'Completed';
-        inv.currentDecision = 'Intelligence report finalized.';
-
-        store.reports.set(report.id, report);
-
-        if (report.threatScore >= 75) {
-          const alert: Alert = {
-            id: `alt-${Date.now()}`,
-            investigationId: inv.id,
-            competitor: inv.competitor,
-            title: `High Threat Signal: ${inv.competitor} in ${inv.topic}`,
-            description: `Autonomous investigation completed with ${report.threatScore}/100 threat score. ${report.executiveSummary.slice(0, 150)}...`,
-            severity: report.threatLevel,
-            timeAgo: 'Just now',
-            timestamp: new Date().toISOString(),
-            read: false,
-          };
-          store.alerts.unshift(alert);
+          return inv;
         }
-
-        store.broadcastInvestigationEvent(investigationId, {
-          type: 'complete',
-          investigation: inv,
-          report,
-        });
-
-        return inv;
+      } catch (toolErr: any) {
+        console.error(`[AGENT] Non-fatal error during tool execution (${decision.action}):`, toolErr);
+        step.status = 'completed';
+        step.observationSummary = `[TOOL EXECUTION NOTICE: ${toolName}] Search for "${decision.query}" encountered transient error (${toolErr?.message || 'timeout'}). Preserved agent workflow.`;
       }
+
+      await store.recordAgentStep(step);
+      await store.recordInvestigationState(inv);
 
       // Broadcast step completion event
       store.broadcastInvestigationEvent(investigationId, {

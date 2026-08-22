@@ -205,6 +205,8 @@ export interface Alert {
   sourceUrl?: string;
 }
 
+export type ThreatAlert = Alert;
+
 export interface EmergingTrendItem {
   id: string;
   name: string;
