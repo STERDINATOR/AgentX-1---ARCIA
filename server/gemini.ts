@@ -1,4 +1,7 @@
-import { GoogleGenAI, GenerateContentParameters, GenerateContentResponse } from '@google/genai';
+import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 let geminiClient: GoogleGenAI | null = null;
 
@@ -70,8 +73,12 @@ export async function callGeminiSafe(params: GeminiCallParams): Promise<{ text: 
         const is503 = errMessage.includes('503') || errMessage.includes('UNAVAILABLE') || errMessage.includes('high demand');
 
         if (is429 || is503) {
-          // Exponential backoff with jitter
-          const delay = Math.min(3000, 800 * Math.pow(1.8, attempt) + Math.random() * 400);
+          // If search grounding hit quota on first attempt, retry immediately without tools
+          if (params.enableSearchGrounding && attempt === 0) {
+            continue;
+          }
+          // Otherwise exponential backoff with jitter
+          const delay = Math.min(2500, 500 * Math.pow(1.5, attempt) + Math.random() * 200);
           await new Promise(res => setTimeout(res, delay));
         } else {
           // If other error, break to next model
