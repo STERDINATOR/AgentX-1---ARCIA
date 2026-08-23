@@ -305,7 +305,17 @@ export async function traced<T>(name: string, fn: () => Promise<T>): Promise<T> 
     throw err;
   }
 }
-
+export async function traced2<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const span = startSpan(name);
+  try {
+    const result = await fn();
+    span.end();
+    return result;
+  } catch (err) {
+    span.fail(err);
+    throw err;
+  }
+}
 export function getRecentSpans() {
   return [...recentSpans].reverse();
 }
